@@ -41,6 +41,7 @@ typedef struct {        // Struct is defined before including config.h --
 #define NOBLINK 0       // Not currently engaged in a blink
 #define ENBLINK 1       // Eyelid is currently closing
 #define DEBLINK 2       // Eyelid is currently opening
+#define DEAD 3
 typedef struct {
   uint8_t  state;       // NOBLINK/ENBLINK/DEBLINK
   uint32_t duration;    // Duration of blink state (micros)
@@ -52,6 +53,7 @@ typedef struct {
 struct {                // One-per-eye structure
   displayType *display; // -> OLED/TFT object
   eyeBlink     blink;   // Current blink/wink state
+  uint16_t         dryness;
 } eye[NUM_EYES];
 
 #ifdef ARDUINO_ARCH_SAMD
@@ -123,9 +125,12 @@ void setup(void) {
   digitalWrite(DISPLAY_BACKLIGHT, LOW);
 #endif
 
+  uint16_t dryness = analogRead(A1);
+
   // Initialize eye objects based on eyeInfo list in config.h:
   for(e=0; e<NUM_EYES; e++) {
     eye[e].display     = new displayType(eyeInfo[e].select, DISPLAY_DC, -1);
+    eye[e].dryness     = dryness;
     eye[e].blink.state = NOBLINK;
     // If project involves only ONE eye and NO other SPI devices, its
     // select line can be permanently tied to GND and corresponding pin
@@ -315,6 +320,7 @@ void drawEye( // Renders one eye.  Inputs must be pre-clipped & valid.
   uint16_t p, a;
   uint32_t d;
 
+
 #if defined(SYNCPIN) && (SYNCPIN >= 0)
   if(receiver) {
     // Overwrite arguments with values in syncStruct.  Disable interrupts
@@ -371,20 +377,35 @@ void drawEye( // Renders one eye.  Inputs must be pre-clipped & valid.
     irisX   = scleraXsave - (SCLERA_WIDTH - IRIS_WIDTH) / 2;
     for(screenX=0; screenX<SCREEN_WIDTH; screenX++, scleraX++, irisX++) {
       if((lower[screenY][screenX] <= lT) ||
-         (upper[screenY][screenX] <= uT)) {             // Covered by eyelid
+        (upper[screenY][screenX] <= uT)) {             // Covered by eyelid
         p = 0;
       } else if((irisY < 0) || (irisY >= IRIS_HEIGHT) ||
                 (irisX < 0) || (irisX >= IRIS_WIDTH)) { // In sclera
         p = sclera[scleraY][scleraX];
+        if (p == 0xFFFF) {
+          p = getColorFromDryness(eye[e].dryness, screenX, screenY);
+        }
       } else {                                          // Maybe iris...
         p = polar[irisY][irisX];                        // Polar angle/dist
         d = p & 0x7F;                                   // Distance from edge (0-127)
         if(d < irisThreshold) {                         // Within scaled iris area
           d = d * irisScale / 65536;                    // d scaled to iris image height
           a = (IRIS_MAP_WIDTH * (p >> 7)) / 512;        // Angle (X)
-          p = iris[d][a];                               // Pixel = iris
+          p = iris[d][a]; 
+          // Pixel = iris
         } else {                                        // Not in iris
           p = sclera[scleraY][scleraX];                 // Pixel = sclera
+          // Serial.print("sclera[");
+          // Serial.print(scleraY);
+          // Serial.print("][");
+          // Serial.print(scleraX);
+          // Serial.print("] = ");
+          // Serial.println(sclera[scleraY][scleraX]);
+          if (p == 0xFFFF) {
+            p = getColorFromDryness(eye[e].dryness, screenX, screenY);
+          } 
+          // Serial.print("drycolor = ");
+          // Serial.println(p);
         }
       }
 #ifdef ARDUINO_ARCH_SAMD
@@ -449,38 +470,18 @@ void frame( // Process motion for a single frame of left or right eye
 
   if(!(++frames & 255)) { // Every 256 frames...
     uint32_t elapsed = (millis() - startTime) / 1000;
-    if(elapsed) Serial.println(frames / elapsed); // Print FPS
+    if(elapsed) {
+      Serial.print("fps = ");
+      Serial.println(frames / elapsed); // Print FPS
+    }
   }
 
   if(++eyeIndex >= NUM_EYES) eyeIndex = 0; // Cycle through eyes, 1 per call
 
   // X/Y movement
 
-#if defined(JOYSTICK_X_PIN) && (JOYSTICK_X_PIN >= 0) && \
-    defined(JOYSTICK_Y_PIN) && (JOYSTICK_Y_PIN >= 0)
-
-  // Read X/Y from joystick, constrain to circle
-  int16_t dx, dy;
-  int32_t d;
-  eyeX = analogRead(JOYSTICK_X_PIN); // Raw (unclipped) X/Y reading
-  eyeY = analogRead(JOYSTICK_Y_PIN);
-#ifdef JOYSTICK_X_FLIP
-  eyeX = 1023 - eyeX;
-#endif
-#ifdef JOYSTICK_Y_FLIP
-  eyeY = 1023 - eyeY;
-#endif
-  dx = (eyeX * 2) - 1023; // A/D exact center is at 511.5.  Scale coords
-  dy = (eyeY * 2) - 1023; // X2 so range is -1023 to +1023 w/center at 0.
-  if((d = (dx * dx + dy * dy)) > (1023 * 1023)) { // Outside circle
-    d    = (int32_t)sqrt((float)d);               // Distance from center
-    eyeX = ((dx * 1023 / d) + 1023) / 2;          // Clip to circle edge,
-    eyeY = ((dy * 1023 / d) + 1023) / 2;          // scale back to 0-1023
-  }
-
-#else // Autonomous X/Y eye motion
-      // Periodically initiates motion to a new random point, random speed,
-      // holds there for random period until next motion.
+    // Periodically initiates motion to a new random point, random speed,
+    // holds there for random period until next motion.
 
   static boolean  eyeInMotion      = false;
   static int16_t  eyeOldX=512, eyeOldY=512, eyeNewX=512, eyeNewY=512;
@@ -517,9 +518,7 @@ void frame( // Process motion for a single frame of left or right eye
       eyeInMotion      = true;            // Start move on next frame
     }
   }
-
-#endif // JOYSTICK_X_PIN etc.
-
+  
   // Blinking
 
 #ifdef AUTOBLINK
@@ -675,35 +674,48 @@ void split( // Subdivides motion path into two sub-paths w/randimization
 // MAIN LOOP -- runs continuously after setup() ----------------------------
 
 void loop() {
+  if (true) // millis() - startTime >= 1800000)  //test whether the period (30 minute) has elapsed
+  {
+    uint16_t dryness = analogRead(A1);
+    Serial.println("Update Dryness");
+    for(uint8_t e=0; e<NUM_EYES; e++) {
+      eye[e].dryness = dryness;
+    }
+  }
 
-#if defined(LIGHT_PIN) && (LIGHT_PIN >= 0) // Interactive iris
-
-  int16_t v = analogRead(LIGHT_PIN);       // Raw dial/photocell reading
-#ifdef LIGHT_PIN_FLIP
-  v = 1023 - v;                            // Reverse reading from sensor
-#endif
-  if(v < LIGHT_MIN)      v = LIGHT_MIN;  // Clamp light sensor range
-  else if(v > LIGHT_MAX) v = LIGHT_MAX;
-  v -= LIGHT_MIN;  // 0 to (LIGHT_MAX - LIGHT_MIN)
-#ifdef LIGHT_CURVE  // Apply gamma curve to sensor input?
-  v = (int16_t)(pow((double)v / (double)(LIGHT_MAX - LIGHT_MIN),
-    LIGHT_CURVE) * (double)(LIGHT_MAX - LIGHT_MIN));
-#endif
-  // And scale to iris range (IRIS_MAX is size at LIGHT_MIN)
-  v = map(v, 0, (LIGHT_MAX - LIGHT_MIN), IRIS_MAX, IRIS_MIN);
-#ifdef IRIS_SMOOTH // Filter input (gradual motion)
-  static int16_t irisValue = (IRIS_MIN + IRIS_MAX) / 2;
-  irisValue = ((irisValue * 15) + v) / 16;
-  frame(irisValue);
-#else // Unfiltered (immediate motion)
-  frame(v);
-#endif // IRIS_SMOOTH
-
-#else  // Autonomous iris scaling -- invoke recursive function
+  for(uint8_t e=0; e<NUM_EYES; e++) {
+    Serial.print("dryness[");
+    Serial.print(e);
+    Serial.print("] = ");
+    Serial.println(eye[e].dryness);
+    getColorFromDryness(eye[e].dryness, 0, 0);
+  }
 
   newIris = random(IRIS_MIN, IRIS_MAX);
   split(oldIris, newIris, micros(), 10000000L, IRIS_MAX - IRIS_MIN);
   oldIris = newIris;
 
-#endif // LIGHT_PIN
+  return;
+
 }
+
+// upgrades, do every second pixel or something
+uint16_t getColorFromDryness(uint16_t dryness, uint8_t screenX, uint8_t screenY) {
+  float ratio = ((float) dryness / 1023);
+  uint16_t red = (ratio * 31);
+
+  if (screenX == 0 && screenY == 0) {
+    Serial.print("screenX = ");
+    Serial.println(screenX);
+    Serial.print("screenY = ");
+    Serial.println(screenY);
+    Serial.print("dryness = ");
+    Serial.println(dryness);
+    Serial.print("ratio = ");
+    Serial.println(ratio);
+    Serial.print("red = ");
+    Serial.println(red);
+  }
+  return red << 11;
+}
+  
