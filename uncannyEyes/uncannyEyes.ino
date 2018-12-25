@@ -704,18 +704,18 @@ uint16_t getColorFromDryness(uint16_t dryness, uint8_t screenX, uint8_t screenY)
   float ratio = ((float) dryness / 1023);
   uint16_t red = (ratio * 31);
 
-  if (screenX == 0 && screenY == 0) {
-    Serial.print("screenX = ");
-    Serial.println(screenX);
-    Serial.print("screenY = ");
-    Serial.println(screenY);
-    Serial.print("dryness = ");
-    Serial.println(dryness);
-    Serial.print("ratio = ");
-    Serial.println(ratio);
-    Serial.print("red = ");
-    Serial.println(red);
-  }
+  // if (screenX == 0 && screenY == 0) {
+  //   Serial.print("screenX = ");
+  //   Serial.println(screenX);
+  //   Serial.print("screenY = ");
+  //   Serial.println(screenY);
+  //   Serial.print("dryness = ");
+  //   Serial.println(dryness);
+  //   Serial.print("ratio = ");
+  //   Serial.println(ratio);
+  //   Serial.print("red = ");
+  //   Serial.println(red);
+  // }
   return red << 11;
 }
   
