@@ -674,7 +674,7 @@ void split( // Subdivides motion path into two sub-paths w/randimization
 // MAIN LOOP -- runs continuously after setup() ----------------------------
 
 void loop() {
-  if (true) // millis() - startTime >= 1800000)  //test whether the period (30 minute) has elapsed
+  if (true) // millis() - startTime >= 300000)  //test whether the period (5 minute) has elapsed
   {
     uint16_t dryness = analogRead(A1);
     Serial.println("Update Dryness");
