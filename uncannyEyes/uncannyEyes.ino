@@ -688,7 +688,7 @@ void loop() {
     Serial.print(e);
     Serial.print("] = ");
     Serial.println(eye[e].dryness);
-    getColorFromDryness(eye[e].dryness, 0, 0);
+    // getColorFromDryness(eye[e].dryness, 0, 0);
   }
 
   newIris = random(IRIS_MIN, IRIS_MAX);
