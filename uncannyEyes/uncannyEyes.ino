@@ -699,8 +699,13 @@ void loop() {
 
 }
 
-// upgrades, do every second pixel or something
+// TODO - maybe an upgrade, do every second pixel or something to make it look like dry eyes
 uint16_t getColorFromDryness(uint16_t dryness, uint8_t screenX, uint8_t screenY) {
+  // if its less than 800, then its watered enough, and doesn't need watering
+  if (dryness < 800) {
+    return 0xFFFF;
+  }
+  // otherwise calculate how red it should be
   float ratio = ((float) dryness / 1023);
   uint16_t red = (ratio * 31);
 
